@@ -98,31 +98,58 @@ for i in range(0, len(df), n_cols):
         with col:
             name = row["Name"]
 
-            # small product image (from Walmart)
             walmart_img = row.get("Walmart Image")
-            if isinstance(walmart_img, str) and walmart_img.strip():
-                st.image(walmart_img, width=60)
+            walmart_link = row.get("Walmart link")
+            safeway_link = row.get("Safeway link")
 
-            # Name
+            # ---- ONE product image (clickable Walmart link if available) ----
+            if isinstance(walmart_img, str) and walmart_img.strip():
+                if isinstance(walmart_link, str) and walmart_link.strip():
+                    st.markdown(
+                        f"<a href='{walmart_link}' target='_blank'>"
+                        f"<img src='{walmart_img}' width='70'></a>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.image(walmart_img, width=70)
+
+            # Item name
             st.caption(name)
 
-            # Prices for Walmart & Safeway
+            # Prices
             w_price = float(row["Walmart_price"]) if pd.notna(row["Walmart_price"]) else 0.0
             s_price = float(row["Safeway_price"]) if pd.notna(row["Safeway_price"]) else 0.0
 
+            # ---- Walmart + Safeway: one logo column each, clickable price ----
             price_col1, price_col2, price_col3 = st.columns([1, 1, 1])
 
-            # Walmart logo + price
+            # Walmart
             with price_col1:
                 st.image(wmt_logo, width=22)
-                st.write(f"${w_price:.2f}")
+                if walmart_link and isinstance(walmart_link, str) and walmart_link.strip():
+                    st.markdown(
+                        f"<a href='{walmart_link}' target='_blank' "
+                        f"style='text-decoration:none; color:inherit;'>"
+                        f"${w_price:.2f}</a>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.write(f"${w_price:.2f}")
 
-            # Safeway logo + price
+            # Safeway
             with price_col2:
                 st.image(safeway_logo, width=22)
-                st.write(f"${s_price:.2f}")
+                if safeway_link and isinstance(safeway_link, str) and safeway_link.strip():
+                    st.markdown(
+                        f"<a href='{safeway_link}' target='_blank' "
+                        f"style='text-decoration:none; color:inherit;'>"
+                        f"${s_price:.2f}</a>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.write(f"${s_price:.2f}")
 
-            # Your Store price input
+            # ---- Your Store price input ----
             with price_col3:
                 st.write("Your Store")
                 default_your_price = st.session_state.your_store_prices.get(
@@ -139,7 +166,7 @@ for i in range(0, len(df), n_cols):
                 )
                 st.session_state.your_store_prices[name] = your_price
 
-            # Quantity input
+            # ---- Quantity input ----
             qty_key = f"qty_{idx}"
             current_qty = int(st.session_state.quantities.get(name, 1))
             new_qty = st.number_input(
@@ -151,6 +178,7 @@ for i in range(0, len(df), n_cols):
                 label_visibility="collapsed",
             )
             st.session_state.quantities[name] = new_qty
+
 
 # ===================== BUILD BASKET DATA (AFTER CATALOG) ================== #
 basket_names = [name for name, q in st.session_state.quantities.items() if q > 0]
@@ -218,6 +246,6 @@ with basket_container:
             for col in ["Walmart Price", "Safeway Price", "Your Store Price"]:
                 table_df[col] = table_df[col].apply(lambda x: f"${x:.2f}")
 
-            st.dataframe(table_df, use_container_width=True)
+            st.dataframe(table_df, width='stretch')
         else:
             st.write("Your basket is empty.")
