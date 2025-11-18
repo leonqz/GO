@@ -11,15 +11,11 @@ st.set_page_config(
     page_title="Basket Price Comparator",
     layout="wide",
 )
-st.markdown(
-    "<div style='text-align:center;'>"
-    "<img src='puyallup.jpg' width='600'>"
-    "</div>",
-    unsafe_allow_html=True,
-)
-
+st.image("puyallup.jpg", use_container_width=True)
 
 st.title("Puyallup Basket Comparison")
+st.markdown("_Updated November 18, 2025_")
+
 
 # --- Load data ------------------------------------------------------------- #
 @st.cache_data
