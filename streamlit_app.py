@@ -12,7 +12,6 @@ st.title("Basket Price Comparator – Walmart vs Safeway vs Your Competitor")
 # --- Load data ------------------------------------------------------------- #
 @st.cache_data
 def load_data():
-    # Replace with your actual file path
     df = pd.read_csv("walmart_data.csv")
     return df
 
@@ -26,72 +25,66 @@ def price_to_float(price_str):
     return float(cleaned) if cleaned else None
 
 df["Walmart_price"] = df["Walmart"].astype(str).apply(price_to_float)
-df["Safeway_price"] = df["Safeway"].astype(str).apply(price_to_float)
+df["Safeway_price"]  = df["Safeway"].astype(str).apply(price_to_float)
 
-# Initialize session state for quantities if not present
+# Replace missing prices with 0 to avoid math issues
+df["Walmart_price"] = df["Walmart_price"].fillna(0)
+df["Safeway_price"]  = df["Safeway_price"].fillna(0)
+
+# --- Session state: default 1 of each item -------------------------------- #
 if "quantities" not in st.session_state:
-    st.session_state.quantities = {name: 0 for name in df["Name"]}
+    st.session_state.quantities = {name: 1 for name in df["Name"]}
 
 # --- Layout: left = item grid, right = basket comparison ------------------- #
 left_col, right_col = st.columns([3, 2])
 
-# ===================== LEFT: ITEM GRID ===================================== #
+# ===================== LEFT: COMPACT ITEM GRID ============================ #
 with left_col:
-    st.subheader("Items – Add to Basket")
+    st.subheader("Items – Adjust Your Basket")
 
-    n_cols = 2  # grid: 2 product cards per row
+    # 4 compact cards per row
+    n_cols = 4
 
     for i in range(0, len(df), n_cols):
         row_df = df.iloc[i : i + n_cols]
-        cols = st.columns(n_cols)
+        cols = st.columns(len(row_df))
 
         for col, (_, row) in zip(cols, row_df.iterrows()):
             with col:
                 name = row["Name"]
 
-                # --- Walmart image (small) ---
+                # One small image (Walmart)
                 walmart_img = row.get("Walmart Image")
                 if pd.notna(walmart_img) and str(walmart_img).strip():
-                    st.image(str(walmart_img), width=80, caption="Walmart")
+                    st.image(str(walmart_img), width=60)
 
-                # --- Safeway image (small) ---
-                safeway_img = row.get("Safeway Image")
-                if pd.notna(safeway_img) and str(safeway_img).strip():
-                    st.image(str(safeway_img), width=80, caption="Safeway")
+                # Name (short, compact)
+                st.caption(name)
 
-                st.markdown(f"**{name}**")
+                # Tiny price line
+                price_parts = []
+                if row["Walmart_price"] > 0:
+                    price_parts.append(f"W: ${row['Walmart_price']:.2f}")
+                if row["Safeway_price"] > 0:
+                    price_parts.append(f"S: ${row['Safeway_price']:.2f}")
+                if price_parts:
+                    st.markdown(" · ".join(price_parts))
 
-                # Prices
-                if pd.notna(row["Walmart_price"]):
-                    st.write(f"Walmart: **${row['Walmart_price']:.2f}**")
-                if pd.notna(row["Safeway_price"]):
-                    st.write(f"Safeway: **${row['Safeway_price']:.2f}**")
-
-                # Links
-                walmart_link = row.get("Walmart link")
-                safeway_link = row.get("Safeway link")
-                links_parts = []
-                if isinstance(walmart_link, str) and walmart_link.strip():
-                    links_parts.append(f"[Walmart link]({walmart_link})")
-                if isinstance(safeway_link, str) and safeway_link.strip():
-                    links_parts.append(f"[Safeway link]({safeway_link})")
-                if links_parts:
-                    st.markdown(" · ".join(links_parts))
-
-                # Quantity control (adds to basket)
+                # Quantity control (defaults to 1)
                 qty_key = f"qty_{name}"
-                current_qty = st.session_state.quantities.get(name, 0)
+                current_qty = int(st.session_state.quantities.get(name, 1))
 
                 new_qty = st.number_input(
                     "Qty",
                     min_value=0,
                     step=1,
-                    value=int(current_qty),
+                    value=current_qty,
                     key=qty_key,
+                    label_visibility="collapsed",
                 )
                 st.session_state.quantities[name] = new_qty
 
-# Build basket from quantities
+# Build basket from current quantities
 basket_names = [name for name, q in st.session_state.quantities.items() if q > 0]
 basket_df = df[df["Name"].isin(basket_names)].copy()
 basket_df["Quantity"] = basket_df["Name"].map(st.session_state.quantities).astype(int)
@@ -104,7 +97,6 @@ if not basket_df.empty:
         basket_df["Safeway_price"] * basket_df["Quantity"]
     )
 else:
-    # create empty columns so right side code doesn't crash
     basket_df["Walmart_line_total"] = 0.0
     basket_df["Safeway_line_total"] = 0.0
 
@@ -112,48 +104,48 @@ else:
 with right_col:
     st.subheader("Basket Comparison")
 
-    # Competitor setup
-    competitor_name = st.text_input("Competitor name", value="My Competitor")
-    st.caption("Enter competitor prices for items in your basket (if any).")
+    # Totals
+    walmart_total = float(basket_df["Walmart_line_total"].sum()) if not basket_df.empty else 0.0
+    safeway_total = float(basket_df["Safeway_line_total"].sum()) if not basket_df.empty else 0.0
 
-    # competitor prices only for items in basket
-    comp_prices = {}
-    comp_upcs = {}
+    # Summary metrics
+    st.markdown("### Basket Totals")
+
+    m1, m2 = st.columns(2)
+
+    m1.metric("Walmart basket", f"${walmart_total:,.2f}")
+
+    safeway_delta = safeway_total - walmart_total
+    safeway_delta_label = (
+        f"+${abs(safeway_delta):,.2f} vs Walmart"
+        if safeway_delta >= 0
+        else f"-${abs(safeway_delta):,.2f} vs Walmart"
+    )
+    m2.metric("Safeway basket", f"${safeway_total:,.2f}", safeway_delta_label)
+
+    # Item-level breakdown
+    st.markdown("### Item-level Breakdown")
 
     if not basket_df.empty:
-        for _, row in basket_df.iterrows():
-            name = row["Name"]
-            p_key = f"comp_price_{name}"
-            u_key = f"comp_upc_{name}"
-
-            comp_price = st.number_input(
-                f"{competitor_name} price – {name}",
-                min_value=0.0,
-                step=0.01,
-                value=0.0,
-                key=p_key,
-            )
-            comp_upc = st.text_input(
-                f"UPC for {name} (optional)",
-                key=u_key,
-            )
-
-            comp_prices[name] = comp_price
-            comp_upcs[name] = comp_upc
-
-        basket_df["Competitor_price"] = basket_df["Name"].map(comp_prices)
-        basket_df["Competitor_line_total"] = (
-            basket_df["Competitor_price"] * basket_df["Quantity"]
+        display_cols = [
+            "Name",
+            "Quantity",
+            "Walmart_price",
+            "Walmart_line_total",
+            "Safeway_price",
+            "Safeway_line_total",
+        ]
+        pretty_basket = basket_df[display_cols].rename(
+            columns={
+                "Walmart_price": "Walmart price",
+                "Walmart_line_total": "Walmart total",
+                "Safeway_price": "Safeway price",
+                "Safeway_line_total": "Safeway total",
+            }
         )
+        st.dataframe(pretty_basket, use_container_width=True)
     else:
-        basket_df["Competitor_price"] = 0.0
-        basket_df["Competitor_line_total"] = 0.0
-
-    # Totals
-    walmart_total = float(basket_df["Walmart_line_total"].sum())
-    safeway_total = float(basket_df["Safeway_line_total"].sum())
-    comp_valid = basket_df["Competitor_price"] > 0
-    competitor_total = float(basket_df.loc[comp_valid, "Competitor_line_total"].sum())
+        st.info("No items in your basket yet – adjust quantities on the left.")
 
     # Summary metrics
     st.markdown("### Basket Totals")
@@ -170,20 +162,7 @@ with right_col:
     )
     m2.metric("Safeway basket", f"${safeway_total:,.2f}", safeway_delta_label)
 
-    if competitor_total > 0:
-        comp_delta = competitor_total - walmart_total
-        comp_delta_label = (
-            f"+${abs(comp_delta):,.2f} vs Walmart"
-            if comp_delta >= 0
-            else f"-${abs(comp_delta):,.2f} vs Walmart"
-        )
-        m3.metric(
-            f"{competitor_name} basket",
-            f"${competitor_total:,.2f}",
-            comp_delta_label,
-        )
-    else:
-        m3.metric(f"{competitor_name} basket", "—", "Enter prices")
+
 
     # Item-level breakdown
     st.markdown("### Item-level Breakdown")
@@ -196,8 +175,7 @@ with right_col:
             "Walmart_line_total",
             "Safeway_price",
             "Safeway_line_total",
-            "Competitor_price",
-            "Competitor_line_total",
+
         ]
         pretty_basket = basket_df[display_cols].rename(
             columns={
@@ -205,10 +183,37 @@ with right_col:
                 "Walmart_line_total": "Walmart total",
                 "Safeway_price": "Safeway price",
                 "Safeway_line_total": "Safeway total",
-                "Competitor_price": f"{competitor_name} price",
-                "Competitor_line_total": f"{competitor_name} total",
+
             }
         )
         st.dataframe(pretty_basket, use_container_width=True)
     else:
-        st.info("No items in your basket yet – add quantities on the left.")
+        st.info("No items in your basket yet – adjust quantities on the left.")
+
+    # ===================== UPC REQUEST SECTION ============================ #
+    st.markdown("---")
+    st.subheader("Request a UPC")
+
+    st.caption("If you need us to look up a UPC for any item, request it here:")
+
+    # Initialize list if not present
+    if "requested_upcs" not in st.session_state:
+        st.session_state.requested_upcs = []
+
+    new_request = st.text_input(
+        "Enter item name or description",
+        key="upc_request_input"
+    )
+
+    if st.button("Submit UPC Request"):
+        if new_request.strip():
+            st.session_state.requested_upcs.append(new_request.strip())
+            st.success("UPC request submitted!")
+        else:
+            st.warning("Please enter a valid item name or description.")
+
+    # Show requested UPCs
+    if st.session_state.requested_upcs:
+        st.markdown("### Requested UPCs")
+        for r in st.session_state.requested_upcs:
+            st.markdown(f"- {r}")
