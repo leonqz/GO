@@ -65,7 +65,6 @@ st.markdown("---")
 st.subheader("Catalog – Adjust Your Basket")
 
 # ===================== BOTTOM: CATALOG GRID =============================== #
-# Compact multi-column layout; changing quantities updates the basket
 n_cols = 4  # number of items per row
 
 for i in range(0, len(df), n_cols):
@@ -138,26 +137,27 @@ with basket_container:
     )
     m2.metric("Safeway basket", f"${safeway_total:,.2f}", safeway_delta_label)
 
-    # Item-level breakdown
-    st.markdown("### Item-level Breakdown")
+    # Ultra-compact basket item visuals
+    st.markdown("### Items in Your Basket")
 
     if not basket_df.empty:
-        display_cols = [
-            "Name",
-            "Quantity",
-            "Walmart_price",
-            "Walmart_line_total",
-            "Safeway_price",
-            "Safeway_line_total",
-        ]
-        pretty_basket = basket_df[display_cols].rename(
-            columns={
-                "Walmart_price": "Walmart price",
-                "Walmart_line_total": "Walmart total",
-                "Safeway_price": "Safeway price",
-                "Safeway_line_total": "Safeway total",
-            }
-        )
-        st.dataframe(pretty_basket, use_container_width=True)
+        n_cols_top = 8  # very compact, 8 items per row
+        for i in range(0, len(basket_df), n_cols_top):
+            row_slice = basket_df.iloc[i : i + n_cols_top]
+            cols = st.columns(len(row_slice))
+
+            for col, (_, row) in zip(cols, row_slice.iterrows()):
+                with col:
+                    img_url = row.get("Walmart Image")
+                    qty = int(row["Quantity"])
+
+                    if isinstance(img_url, str) and img_url.strip():
+                        st.image(img_url, width=60)
+
+                    # tiny qty badge like "x3"
+                    st.markdown(
+                        f"<div style='text-align:center; font-size:12px; opacity:0.7;'>x{qty}</div>",
+                        unsafe_allow_html=True,
+                    )
     else:
-        st.info("No items in your basket yet – set quantities in the catalog below.")
+        st.info("No items in your basket yet – set quantities below.")
