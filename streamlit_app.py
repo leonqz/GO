@@ -11,7 +11,7 @@ st.set_page_config(
     page_title="Basket Price Comparator",
     layout="wide",
 )
-st.image("puyallup.jpg", use_container_width=True)
+st.image("puyallup.jpg", width = 400)
 
 st.title("Puyallup Basket Comparison")
 st.markdown("_Updated November 18, 2025_")
