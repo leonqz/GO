@@ -11,8 +11,15 @@ st.set_page_config(
     page_title="Basket Price Comparator",
     layout="wide",
 )
+st.markdown(
+    "<div style='text-align:center;'>"
+    "<img src='puyallup.jpg' width='600'>"
+    "</div>",
+    unsafe_allow_html=True,
+)
 
-st.title("Basket Price Comparator – Walmart vs Safeway vs Your Store")
+
+st.title("Puyallup Basket Comparison")
 
 # --- Load data ------------------------------------------------------------- #
 @st.cache_data
