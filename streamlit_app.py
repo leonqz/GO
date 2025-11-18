@@ -1,297 +1,214 @@
-import os
 import streamlit as st
 import pandas as pd
+import re
 
-# ------------------ Page setup ------------------
 st.set_page_config(
-    page_title="Thanksgiving Basket Compare",
-    page_icon="🦃",
-    layout="wide"
+    page_title="Basket Price Comparator",
+    layout="wide",
 )
 
-st.title("🦃 Thanksgiving Basket Compare")
-st.caption("Build a basket and see how the total price compares across three stores.")
+st.title("Basket Price Comparator – Walmart vs Safeway vs Your Competitor")
 
-# ------------------ Session state ------------------
-if "basket" not in st.session_state:
-    # basket is: {row_index: quantity}
-    st.session_state.basket = {}
+# --- Load data ------------------------------------------------------------- #
+@st.cache_data
+def load_data():
+    # Replace with your actual file path
+    df = pd.read_csv("walmart_data.csv")
+    return df
 
-if "last_added" not in st.session_state:
-    st.session_state.last_added = None
+df = load_data()
 
-# ------------------ Styling ------------------
-st.markdown(
-    """
-    <style>
-    .catalog-card {
-        border-radius: 1rem;
-        padding: 0.75rem;
-        margin-bottom: 0.75rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        background: #ffffff;
-    }
-    .catalog-title {
-        font-weight: 600;
-        font-size: 1rem;
-        margin-bottom: 0.25rem;
-    }
-    .catalog-price {
-        font-size: 0.9rem;
-        opacity: 0.85;
-        margin-bottom: 0.5rem;
-    }
-    .basket-container {
-        border-radius: 1rem;
-        padding: 0.9rem;
-        background: #fffaf2;
-        border: 1px solid #f3d2a2;
-    }
-    .basket-header {
-        font-weight: 700;
-        font-size: 1.2rem;
-        margin-bottom: 0.5rem;
-    }
-    .basket-summary {
-        font-size: 0.95rem;
-        margin-bottom: 0.75rem;
-    }
-    .totals-card {
-        border-radius: 0.9rem;
-        padding: 0.75rem 0.9rem;
-        background: #ffffff;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-        border: 1px solid #f0e2c5;
-    }
-    .totals-title {
-        font-size: 0.9rem;
-        font-weight: 600;
-        margin-bottom: 0.2rem;
-    }
-    .totals-value {
-        font-weight: 700;
-        font-size: 1.2rem;
-        margin-bottom: 0.1rem;
-    }
-    .totals-note {
-        font-size: 0.8rem;
-        opacity: 0.8;
-    }
-    .basket-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.25rem;
-        margin-top: 0.5rem;
-    }
-    .basket-image {
-        width: 70px;
-        height: 70px;
-        object-fit: cover;
-        border-radius: 0.75rem;
-        box-shadow: 0 1px 5px rgba(0,0,0,0.12);
-        border: 2px solid #f3d2a2;
-    }
-    .basket-image.float-in {
-        animation: float-in 0.4s ease-out;
-    }
-    @keyframes float-in {
-        0% { transform: translateY(-14px); opacity: 0; }
-        100% { transform: translateY(0); opacity: 1; }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# Clean price strings like "$1.27" → 1.27
+def price_to_float(price_str):
+    if pd.isna(price_str):
+        return None
+    cleaned = re.sub(r"[^0-9.\-]", "", str(price_str))
+    return float(cleaned) if cleaned else None
 
-# ------------------ Sidebar ------------------
-st.sidebar.header("📄 Data & Settings")
-uploaded_file = st.sidebar.file_uploader("Upload CSV (optional)", type=["csv"])
+df["Walmart_price"] = df["Walmart"].astype(str).apply(price_to_float)
+df["Safeway_price"] = df["Safeway"].astype(str).apply(price_to_float)
 
-store1_name = st.sidebar.text_input("Your store name", "Our Store")
-store2_name = st.sidebar.text_input("Competitor 1 name", "Store A")
-store3_name = st.sidebar.text_input("Competitor 2 name", "Store B")
+# Initialize session state for quantities if not present
+if "quantities" not in st.session_state:
+    st.session_state.quantities = {name: 0 for name in df["Name"]}
 
-# ------------------ Load data ------------------
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.sidebar.success("Using uploaded CSV.")
-else:
-    # Try to load go_demodata.csv first
-    if os.path.exists("go_demodata.csv"):
-        df = pd.read_csv("go_demodata.csv")
-        st.sidebar.success("Loaded go_demodata.csv from project.")
-    else:
-        # Tiny fallback demo if file is missing
-        df = pd.DataFrame(
-            [
-                {
-                    "item": "Turkey (12 lb)",
-                    "image_url": "https://images.pexels.com/photos/5718025/pexels-photo-5718025.jpeg",
-                    "our_price": "$29.99",
-                    "comp1_price": "$32.99",
-                    "comp2_price": "$27.49",
-                },
-                {
-                    "item": "Pumpkin Pie",
-                    "image_url": "https://images.pexels.com/photos/4110004/pexels-photo-4110004.jpeg",
-                    "our_price": "$8.49",
-                    "comp1_price": "$7.99",
-                    "comp2_price": "$9.29",
-                },
-            ]
-        )
-        st.sidebar.warning("go_demodata.csv not found – using demo data.")
+# --- Layout: left = item grid, right = basket comparison ------------------- #
+left_col, right_col = st.columns([3, 2])
 
-required_cols = {"item", "image_url", "our_price", "comp1_price", "comp2_price"}
-missing = required_cols - set(df.columns)
-if missing:
-    st.error(f"Your data is missing columns: {', '.join(missing)}")
-    st.stop()
-
-# Clean price columns (strip $ and commas, convert to float)
-price_cols = ["our_price", "comp1_price", "comp2_price"]
-for col in price_cols:
-    df[col] = (
-        df[col]
-        .astype(str)
-        .str.replace(r"[\$,]", "", regex=True)
-    )
-    df[col] = pd.to_numeric(df[col], errors="coerce")
-
-df = df.dropna(subset=price_cols)
-
-# ------------------ Helper: compute basket totals ------------------
-def compute_totals():
-    total_items = 0
-    total_ours = 0.0
-    total_c1 = 0.0
-    total_c2 = 0.0
-
-    for idx, qty in st.session_state.basket.items():
-        if idx in df.index:
-            r = df.loc[idx]
-            total_items += qty
-            total_ours += r["our_price"] * qty
-            total_c1 += r["comp1_price"] * qty
-            total_c2 += r["comp2_price"] * qty
-    return total_items, total_ours, total_c1, total_c2
-
-
-def diff_note(value, base_value):
-    if base_value == 0:
-        return ""
-    diff = value - base_value
-    pct = (diff / base_value) * 100 if base_value != 0 else 0
-    if abs(diff) < 0.01:
-        return "same as our basket"
-    sign = "+" if diff > 0 else "-"
-    return f"{sign}${abs(diff):.2f} ({sign}{abs(pct):.0f}% vs our basket)"
-
-
-# ------------------ TOP: Basket comparison front and center ------------------
-total_items, total_ours, total_c1, total_c2 = compute_totals()
-
-st.subheader("📊 Basket Price Comparison (All Stores)")
-
-if total_items == 0:
-    st.write("No items in the basket yet — add some below to compare full basket prices. 🥧")
-else:
-    st.markdown(f"**Items in basket:** {total_items}")
-
-    col_a, col_b, col_c = st.columns(3)
-
-    with col_a:
-        st.markdown("<div class='totals-card'>", unsafe_allow_html=True)
-        st.markdown(f"<div class='totals-title'>{store1_name}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='totals-value'>$ {total_ours:.2f}</div>", unsafe_allow_html=True)
-        st.markdown("<div class='totals-note'>Reference basket</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with col_b:
-        st.markdown("<div class='totals-card'>", unsafe_allow_html=True)
-        st.markdown(f"<div class='totals-title'>{store2_name}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='totals-value'>$ {total_c1:.2f}</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='totals-note'>{diff_note(total_c1, total_ours)}</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with col_c:
-        st.markdown("<div class='totals-card'>", unsafe_allow_html=True)
-        st.markdown(f"<div class='totals-title'>{store3_name}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='totals-value'>$ {total_c2:.2f}</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='totals-note'>{diff_note(total_c2, total_ours)}</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-if total_items > 0:
-    st.markdown("")  # small spacing
-    if st.button("Clear basket 🧹"):
-        st.session_state.basket = {}
-        st.session_state.last_added = None
-        st.experimental_rerun()
-
-st.markdown("---")
-
-# ------------------ BOTTOM: Items + visual basket ------------------
-left_col, right_col = st.columns([2, 1])
-
-# -------- Catalog (left) --------
+# ===================== LEFT: ITEM GRID ===================================== #
 with left_col:
-    st.subheader("🛒 Build Your Thanksgiving Basket")
+    st.subheader("Items – Add to Basket")
 
-    for idx, row in df.iterrows():
-        with st.container():
-            st.markdown('<div class="catalog-card">', unsafe_allow_html=True)
+    n_cols = 2  # grid: 2 product cards per row
 
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.image(row["image_url"], use_container_width=True)
+    for i in range(0, len(df), n_cols):
+        row_df = df.iloc[i : i + n_cols]
+        cols = st.columns(n_cols)
 
-            with c2:
-                st.markdown(
-                    f'<div class="catalog-title">{row["item"]}</div>',
-                    unsafe_allow_html=True
+        for col, (_, row) in zip(cols, row_df.iterrows()):
+            with col:
+                name = row["Name"]
+
+                # --- Walmart image (small) ---
+                walmart_img = row.get("Walmart Image")
+                if pd.notna(walmart_img) and str(walmart_img).strip():
+                    st.image(str(walmart_img), width=80, caption="Walmart")
+
+                # --- Safeway image (small) ---
+                safeway_img = row.get("Safeway Image")
+                if pd.notna(safeway_img) and str(safeway_img).strip():
+                    st.image(str(safeway_img), width=80, caption="Safeway")
+
+                st.markdown(f"**{name}**")
+
+                # Prices
+                if pd.notna(row["Walmart_price"]):
+                    st.write(f"Walmart: **${row['Walmart_price']:.2f}**")
+                if pd.notna(row["Safeway_price"]):
+                    st.write(f"Safeway: **${row['Safeway_price']:.2f}**")
+
+                # Links
+                walmart_link = row.get("Walmart link")
+                safeway_link = row.get("Safeway link")
+                links_parts = []
+                if isinstance(walmart_link, str) and walmart_link.strip():
+                    links_parts.append(f"[Walmart link]({walmart_link})")
+                if isinstance(safeway_link, str) and safeway_link.strip():
+                    links_parts.append(f"[Safeway link]({safeway_link})")
+                if links_parts:
+                    st.markdown(" · ".join(links_parts))
+
+                # Quantity control (adds to basket)
+                qty_key = f"qty_{name}"
+                current_qty = st.session_state.quantities.get(name, 0)
+
+                new_qty = st.number_input(
+                    "Qty",
+                    min_value=0,
+                    step=1,
+                    value=int(current_qty),
+                    key=qty_key,
                 )
-                st.markdown(
-                    f'<div class="catalog-price">{store1_name}: <b>${row["our_price"]:.2f}</b></div>',
-                    unsafe_allow_html=True
-                )
+                st.session_state.quantities[name] = new_qty
 
-                add_key = f"add_{idx}"
-                if st.button("Add to basket (at our price)", key=add_key, use_container_width=True):
-                    basket = st.session_state.basket
-                    basket[idx] = basket.get(idx, 0) + 1
-                    st.session_state.basket = basket
-                    st.session_state.last_added = idx
-                    st.toast(f"Added {row['item']} to your basket 🧺")
+# Build basket from quantities
+basket_names = [name for name, q in st.session_state.quantities.items() if q > 0]
+basket_df = df[df["Name"].isin(basket_names)].copy()
+basket_df["Quantity"] = basket_df["Name"].map(st.session_state.quantities).astype(int)
 
-            st.markdown("</div>", unsafe_allow_html=True)
+if not basket_df.empty:
+    basket_df["Walmart_line_total"] = (
+        basket_df["Walmart_price"] * basket_df["Quantity"]
+    )
+    basket_df["Safeway_line_total"] = (
+        basket_df["Safeway_price"] * basket_df["Quantity"]
+    )
+else:
+    # create empty columns so right side code doesn't crash
+    basket_df["Walmart_line_total"] = 0.0
+    basket_df["Safeway_line_total"] = 0.0
 
-# -------- Visual basket (right) --------
+# ===================== RIGHT: BASKET COMPARISON ============================ #
 with right_col:
-    st.subheader("🧺 Items in This Basket")
+    st.subheader("Basket Comparison")
 
-    if total_items == 0:
-        st.write("Start adding items to see your basket fill up.")
+    # Competitor setup
+    competitor_name = st.text_input("Competitor name", value="My Competitor")
+    st.caption("Enter competitor prices for items in your basket (if any).")
+
+    # competitor prices only for items in basket
+    comp_prices = {}
+    comp_upcs = {}
+
+    if not basket_df.empty:
+        for _, row in basket_df.iterrows():
+            name = row["Name"]
+            p_key = f"comp_price_{name}"
+            u_key = f"comp_upc_{name}"
+
+            comp_price = st.number_input(
+                f"{competitor_name} price – {name}",
+                min_value=0.0,
+                step=0.01,
+                value=0.0,
+                key=p_key,
+            )
+            comp_upc = st.text_input(
+                f"UPC for {name} (optional)",
+                key=u_key,
+            )
+
+            comp_prices[name] = comp_price
+            comp_upcs[name] = comp_upc
+
+        basket_df["Competitor_price"] = basket_df["Name"].map(comp_prices)
+        basket_df["Competitor_line_total"] = (
+            basket_df["Competitor_price"] * basket_df["Quantity"]
+        )
     else:
-        basket_html = '<div class="basket-grid">'
-        last = st.session_state.last_added
+        basket_df["Competitor_price"] = 0.0
+        basket_df["Competitor_line_total"] = 0.0
 
-        for idx, qty in st.session_state.basket.items():
-            if idx not in df.index:
-                continue
-            row = df.loc[idx]
-            for i in range(qty):
-                extra_class = " float-in" if idx == last and i == qty - 1 else ""
-                basket_html += (
-                    f'<img src="{row["image_url"]}" '
-                    f'alt="{row["item"]}" '
-                    f'class="basket-image{extra_class}"/>'
-                )
-        basket_html += "</div>"
-        st.markdown(basket_html, unsafe_allow_html=True)
+    # Totals
+    walmart_total = float(basket_df["Walmart_line_total"].sum())
+    safeway_total = float(basket_df["Safeway_line_total"].sum())
+    comp_valid = basket_df["Competitor_price"] > 0
+    competitor_total = float(basket_df.loc[comp_valid, "Competitor_line_total"].sum())
 
+    # Summary metrics
+    st.markdown("### Basket Totals")
+
+    m1, m2, m3 = st.columns(3)
+
+    m1.metric("Walmart basket", f"${walmart_total:,.2f}")
+
+    safeway_delta = safeway_total - walmart_total
+    safeway_delta_label = (
+        f"+${abs(safeway_delta):,.2f} vs Walmart"
+        if safeway_delta >= 0
+        else f"-${abs(safeway_delta):,.2f} vs Walmart"
+    )
+    m2.metric("Safeway basket", f"${safeway_total:,.2f}", safeway_delta_label)
+
+    if competitor_total > 0:
+        comp_delta = competitor_total - walmart_total
+        comp_delta_label = (
+            f"+${abs(comp_delta):,.2f} vs Walmart"
+            if comp_delta >= 0
+            else f"-${abs(comp_delta):,.2f} vs Walmart"
+        )
+        m3.metric(
+            f"{competitor_name} basket",
+            f"${competitor_total:,.2f}",
+            comp_delta_label,
+        )
+    else:
+        m3.metric(f"{competitor_name} basket", "—", "Enter prices")
+
+    # Item-level breakdown
+    st.markdown("### Item-level Breakdown")
+
+    if not basket_df.empty:
+        display_cols = [
+            "Name",
+            "Quantity",
+            "Walmart_price",
+            "Walmart_line_total",
+            "Safeway_price",
+            "Safeway_line_total",
+            "Competitor_price",
+            "Competitor_line_total",
+        ]
+        pretty_basket = basket_df[display_cols].rename(
+            columns={
+                "Walmart_price": "Walmart price",
+                "Walmart_line_total": "Walmart total",
+                "Safeway_price": "Safeway price",
+                "Safeway_line_total": "Safeway total",
+                "Competitor_price": f"{competitor_name} price",
+                "Competitor_line_total": f"{competitor_name} total",
+            }
+        )
+        st.dataframe(pretty_basket, use_container_width=True)
+    else:
+        st.info("No items in your basket yet – add quantities on the left.")
