@@ -20,23 +20,45 @@ def safe_url(u):
 
 @st.cache_data
 def load_offers():
-    offers = pd.read_csv("go_demodata2.csv")
+    offers = pd.read_csv("go_demodata3.csv")
     offers.columns = [c.strip() for c in offers.columns]
 
-    # numeric prices
+    # Numeric prices
     offers["OurPrice_num"] = offers["Our Price"].apply(price_to_float)
     offers["WalmartPrice_num"] = offers["Walmart Price"].apply(price_to_float)
+    offers["SafewayPrice_num"] = offers["Safeway Price"].apply(price_to_float)
 
-    # savings
-    offers["Savings_num"] = offers["WalmartPrice_num"] - offers["OurPrice_num"]
-    offers["Savings_pct"] = (offers["Savings_num"] / offers["WalmartPrice_num"]) * 100
+    # Choose comparison priority: Walmart first, else Safeway
+    offers["Compare Store"] = None
+    offers["ComparePrice_num"] = None
+    offers["Compare Link"] = None
+    offers["Compare Image"] = None
 
-    # clean rows
-    offers = offers.dropna(subset=["Item"])
-    offers["Walmart Link"] = offers["Walmart Link"].apply(safe_url)
-    offers["Walmart Image"] = offers["Walmart Image"].fillna("")
+    walmart_mask = offers["WalmartPrice_num"].notna()
+    safeway_mask = offers["WalmartPrice_num"].isna() & offers["SafewayPrice_num"].notna()
 
-    # sort best deals first
+    offers.loc[walmart_mask, "Compare Store"] = "Walmart"
+    offers.loc[walmart_mask, "ComparePrice_num"] = offers.loc[walmart_mask, "WalmartPrice_num"]
+    offers.loc[walmart_mask, "Compare Link"] = offers.loc[walmart_mask, "Walmart Link"]
+    offers.loc[walmart_mask, "Compare Image"] = offers.loc[walmart_mask, "Walmart Image"]
+
+    offers.loc[safeway_mask, "Compare Store"] = "Safeway"
+    offers.loc[safeway_mask, "ComparePrice_num"] = offers.loc[safeway_mask, "SafewayPrice_num"]
+    offers.loc[safeway_mask, "Compare Link"] = offers.loc[safeway_mask, "Safeway Link"]
+    offers.loc[safeway_mask, "Compare Image"] = offers.loc[safeway_mask, "Safeway Image"]
+
+    # Savings vs chosen comparison store
+    offers["Savings_num"] = offers["ComparePrice_num"] - offers["OurPrice_num"]
+    offers["Savings_pct"] = (offers["Savings_num"] / offers["ComparePrice_num"]) * 100
+
+    # Clean URLs + text
+    offers["Compare Link"] = offers["Compare Link"].apply(safe_url)
+    offers["Inexact Match"] = offers["Inexact Match"].fillna("").astype(str)
+
+    # Keep only rows with something to compare against
+    offers = offers.dropna(subset=["ComparePrice_num"])
+
+    # Sort best deals first
     offers = offers.sort_values(["Savings_pct", "Savings_num"], ascending=False)
 
     return offers
@@ -51,9 +73,9 @@ st.set_page_config(
 st.image("puyallup.jpg", width = 400)
 
 st.title("Puyallup Basket Comparison")
-st.markdown("_Updated November 18, 2025_")
+st.markdown("_Updated January 12, 2025_")
 
-tab1, tab2 = st.tabs(["🧺 Basket Comparator", "🔥 Offers"])
+tab2, tab1 = st.tabs(["🔥 Offers", "🧺 Basket Comparator"])
 
 
 # --- Load data ------------------------------------------------------------- #
@@ -89,39 +111,195 @@ if "your_store_prices" not in st.session_state:
     # item name -> price at "Your Store"
     st.session_state.your_store_prices = {}
 
-# --- Sidebar: Request a UPC ----------------------------------------------- #
-st.sidebar.header("Request a UPC")
-st.sidebar.caption("Need us to look up a UPC? Tell us which item below.")
 
-if "requested_upcs" not in st.session_state:
-    st.session_state.requested_upcs = []
 
-upc_request = st.sidebar.text_input("Item name or description", key="upc_request_input")
 
-if st.sidebar.button("Submit UPC Request"):
-    if upc_request.strip():
-        cleaned = upc_request.strip()
+with tab2:
+    st.markdown("""
+    <style>
+    .offer-row{
+        display:grid;
+        grid-template-columns: 260px 1fr 220px;
+        gap: 18px;
+        align-items: stretch;
+        margin-bottom: 16px;
+    }
 
-        # Save in session state (for display)
-        st.session_state.requested_upcs.append(cleaned)
+    .offer-card{
+    border-radius: 22px;
+    padding: 18px;
+    background: rgba(20,20,20,0.92);   /* dark card */
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 8px 22px rgba(0,0,0,0.6);
+    color: #ffffff;
+    }
+                
+    .offer-img{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height: 220px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.06);
+    overflow:hidden;
+    }
 
-        # Append to CSV file
-        try:
-            with open("upc_requests.csv", "a", newline="") as f:
-                writer = csv.writer(f)
-                # you can add more fields here later (e.g. timestamp, user, etc.)
-                writer.writerow([cleaned])
-        except Exception as e:
-            st.sidebar.warning(f"Could not write to CSV: {e}")
+    .offer-img img{
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        padding: 10px;
+    }
 
-        st.sidebar.success("UPC request submitted!")
-    else:
-        st.sidebar.warning("Please enter a valid item name or description.")
+    .badge{
+        display:inline-block;
+        padding:6px 10px;
+        border-radius:999px;
+        font-weight:800;
+        background:#00c853;
+        color:#0b1a12;
+        border:1px solid rgba(0,0,0,0.08);
+        font-size:13px;
+        margin-bottom: 10px;
+    }
 
-if st.session_state.requested_upcs:
-    st.sidebar.markdown("**Requested UPCs**")
-    for r in st.session_state.requested_upcs:
-        st.sidebar.markdown(f"- {r}")
+    .title{
+        font-weight: 850;
+        font-size: 18px;
+        margin-bottom: 10px;
+    }
+
+    .price-big{
+        font-size: 36px;
+        font-weight: 900;
+        letter-spacing: -0.5px;
+        margin-top: 6px;
+    }
+    .muted{ opacity:0.75; }
+    .small{ font-size:14px; opacity:0.80; }
+
+    .btn{
+        display:block;
+        width:100%;
+        text-align:center;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: rgba(0,0,0,0.12);
+        border: 1px solid rgba(0,0,0,0.12);
+        text-decoration:none;
+        font-weight: 800;
+        margin-top: 12px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+    st.markdown("""
+    <style>
+    /* App background */
+    .stApp {
+        background-color: #000000;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="offer-hero">
+          <h1>🔥 This Week’s BEST Deals</h1>
+          <p>Same brands you already buy — priced to beat Walmart.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    offers = load_offers()
+
+    # Top summary stats
+    valid = offers.dropna(subset=["OurPrice_num", "WalmartPrice_num"])
+    if not valid.empty:
+        avg_pct = valid["Savings_pct"].median()
+        avg_dol = valid["Savings_num"].median()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Median % off Walmart", f"{avg_pct:.0f}%")
+        c2.metric("Median $ savings", f"${avg_dol:.2f}")
+        c3.metric("Offers this week", f"{len(offers)}")
+
+    st.markdown("---")
+    show_df = offers.copy()
+
+
+    # Render cards (flashy flyer style)
+    for _, row in show_df.iterrows():
+        item = row.get("Item", "")
+        img = row.get("Walmart Image", "")
+        link = row.get("Walmart Link", None)
+
+        our_p = row.get("OurPrice_num", None)
+        wmt_p = row.get("WalmartPrice_num", None)
+        sav = row.get("Savings_num", None)
+        savp = row.get("Savings_pct", None)
+
+        badge_text = ""
+        if pd.notna(savp) and savp > 0:
+            badge_text = f"SAVE {savp:.0f}%"
+        elif pd.notna(sav) and sav > 0:
+            badge_text = f"SAVE ${sav:.2f}"
+        else:
+            badge_text = "LOW PRICE"
+
+        # Layout: image | info | CTA
+        compare_store = row.get("Compare Store", "")
+        compare_price = row.get("ComparePrice_num", None)
+        compare_link = row.get("Compare Link", None)
+        inexact_note = str(row.get("Inexact Match", "") or "").strip()
+
+        img_url = img if isinstance(img, str) else ""
+        link_url = compare_link if isinstance(compare_link, str) else ""
+
+        # safe fallbacks for display
+        our_price_txt = f"${our_p:.2f}" if pd.notna(our_p) else "$—"
+        compare_price_txt = f"${compare_price:.2f}" if pd.notna(compare_price) else "$—"
+        sav_txt = f"${sav:.2f}" if pd.notna(sav) else "$—"
+
+        note_html = f"<div class='small muted' style='margin-top:8px;'>* {inexact_note}</div>" if inexact_note else ""
+
+        # make the image clickable if link exists
+        img_html = f"<img src='{img_url}' />"
+        if link_url.strip():
+            img_html = f"<a href='{link_url}' target='_blank' style='display:block; width:100%; height:100%;'>{img_html}</a>"
+
+        btn_html = ""
+        if link_url.strip():
+            btn_html = f"<a class='btn' href='{link_url}' target='_blank'>View at {compare_store}</a>"
+        else:
+            btn_html = "<div class='small muted' style='margin-top:12px;'>No link available</div>"
+
+        st.markdown(
+            f"""
+            <div class="offer-row">
+            <div class="offer-card">
+                <div class="offer-img">{img_html}</div>
+            </div>
+
+            <div class="offer-card">
+                <div class="badge">{badge_text} vs {compare_store}</div>
+                <div class="title">{item}</div>
+                <div class="price-big">{our_price_txt} <span class="small muted">Our Price</span></div>
+                <div class="small muted">{compare_store}: {compare_price_txt} • You save {sav_txt}</div>
+                {note_html}
+            </div>
+
+            <div class="offer-card">
+                <div style="font-size:22px; font-weight:900;">🔗 Link</div>
+                <div class="small muted" style="margin-top:6px;">Open the comparison</div>
+                {btn_html}
+            </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+    )
+
 
 with tab1:
 
@@ -294,161 +472,4 @@ with tab1:
             else:
                 st.write("Your basket is empty.")
 
-
-with tab2:
-    st.markdown(
-        """
-        <style>
-          .offer-hero {
-            border-radius: 24px;
-            padding: 28px;
-            background: radial-gradient(circle at 10% 20%, rgba(255,255,255,0.15), transparent 35%),
-                        linear-gradient(135deg, #ff3d00, #ff9100);
-            color: white;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.18);
-            margin-bottom: 18px;
-          }
-          .offer-hero h1 { margin: 0; font-size: 46px; line-height: 1.0; }
-          .offer-hero p  { margin: 10px 0 0 0; font-size: 18px; opacity: 0.95; }
-
-          .offer-card {
-            border-radius: 22px;
-            padding: 18px;
-            background: rgba(255,255,255,0.70);
-            border: 1px solid rgba(0,0,0,0.06);
-            box-shadow: 0 8px 22px rgba(0,0,0,0.08);
-            margin-bottom: 14px;
-          }
-          .badge {
-            display: inline-block;
-            padding: 6px 10px;
-            border-radius: 999px;
-            font-weight: 800;
-            background: #00c853;
-            color: #0b1a12;
-            border: 1px solid rgba(0,0,0,0.08);
-            font-size: 13px;
-          }
-          .price-big {
-            font-size: 34px;
-            font-weight: 900;
-            letter-spacing: -0.5px;
-          }
-          .price-small {
-            font-size: 16px;
-            opacity: 0.75;
-          }
-          .muted {
-            opacity: 0.75;
-          }
-          .img-wrap img {
-            border-radius: 16px;
-            width: 100%;
-            max-height: 170px;
-            object-fit: contain;
-            background: rgba(255,255,255,0.8);
-            padding: 10px;
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        <div class="offer-hero">
-          <h1>🔥 This Week’s BEST Deals</h1>
-          <p>Same brands you already buy — priced to beat Walmart.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    offers = load_offers()
-
-    # Top summary stats
-    valid = offers.dropna(subset=["OurPrice_num", "WalmartPrice_num"])
-    if not valid.empty:
-        avg_pct = valid["Savings_pct"].median()
-        avg_dol = valid["Savings_num"].median()
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Median % off Walmart", f"{avg_pct:.0f}%")
-        c2.metric("Median $ savings", f"${avg_dol:.2f}")
-        c3.metric("Offers this week", f"{len(offers)}")
-
-    st.markdown("---")
-    total_offers = len(offers)
-
-    if total_offers <= 3:
-        max_show = total_offers
-    else:
-        max_show = st.slider(
-            "How many offers to show?",
-            min_value=3,
-            max_value=min(50, total_offers),
-            value=min(12, total_offers),
-        )
-    show_df = offers.head(max_show).copy()
-
-    # Render cards (flashy flyer style)
-    for _, row in show_df.iterrows():
-        item = row.get("Item", "")
-        img = row.get("Walmart Image", "")
-        link = row.get("Walmart Link", None)
-
-        our_p = row.get("OurPrice_num", None)
-        wmt_p = row.get("WalmartPrice_num", None)
-        sav = row.get("Savings_num", None)
-        savp = row.get("Savings_pct", None)
-
-        badge_text = ""
-        if pd.notna(savp) and savp > 0:
-            badge_text = f"SAVE {savp:.0f}%"
-        elif pd.notna(sav) and sav > 0:
-            badge_text = f"SAVE ${sav:.2f}"
-        else:
-            badge_text = "LOW PRICE"
-
-        # Layout: image | info | CTA
-        left, mid, right = st.columns([1.2, 2.4, 1.2], vertical_alignment="center")
-        with left:
-            st.markdown("<div class='offer-card img-wrap'>", unsafe_allow_html=True)
-            if isinstance(img, str) and img.strip():
-                st.markdown(f"<img src='{img}' />", unsafe_allow_html=True)
-            else:
-                st.write("🛒")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with mid:
-            st.markdown("<div class='offer-card'>", unsafe_allow_html=True)
-            st.markdown(f"<span class='badge'>{badge_text}</span>", unsafe_allow_html=True)
-            st.markdown(f"<div style='margin-top:8px; font-weight:800; font-size:18px;'>{item}</div>", unsafe_allow_html=True)
-
-            if pd.notna(our_p) and pd.notna(wmt_p) and wmt_p > 0:
-                st.markdown(
-                    f"""
-                    <div style="margin-top:10px;">
-                      <div class="price-big">${our_p:.2f} <span class="price-small muted">Our Price</span></div>
-                      <div class="price-small muted">Walmart: ${wmt_p:.2f} • You save ${sav:.2f}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    f"<div class='price-big'>${float(our_p or 0):.2f}</div>",
-                    unsafe_allow_html=True,
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with right:
-            st.markdown("<div class='offer-card'>", unsafe_allow_html=True)
-            st.markdown("### 🏷️ Deal")
-            if pd.notna(sav) and sav > 0:
-                st.markdown(f"**Save:** ${sav:.2f}")
-            if pd.notna(savp) and savp > 0:
-                st.markdown(f"**Percent:** {savp:.0f}% off")
-            st.markdown("---")
-            if link:
-                st.link_button("View at Walmart", link)
-            st.markdown("</div>", unsafe_allow_html=True)
+  
