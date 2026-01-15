@@ -20,7 +20,7 @@ def safe_url(u):
 
 @st.cache_data
 def load_offers():
-    offers = pd.read_csv("go_demodata_spokane.csv")
+    offers = pd.read_csv("go_demodata3.csv")
     offers.columns = [c.strip() for c in offers.columns]
 
     # Numeric prices
@@ -70,9 +70,9 @@ st.set_page_config(
     page_title="Basket Price Comparator",
     layout="wide",
 )
-st.image("spokane.jpeg", width = 400)
+st.image("puyallup.jpg", width = 400)
 
-st.title("Spokane Basket Comparison")
+st.title("Puyallup Basket Comparison")
 st.markdown("_Updated January 12, 2025_")
 
 tab2, tab1 = st.tabs(["🔥 Offers", "🧺 Basket Comparator"])
